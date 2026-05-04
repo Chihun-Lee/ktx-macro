@@ -142,11 +142,14 @@ class JobManager:
             job.log("ERROR: credentials missing")
             return
 
-        try:
-            client = PatchedKorail(creds.ktx_id, creds.ktx_password, auto_login=False)
-            ok = client.login()
-            if not ok:
+        def _new_client() -> PatchedKorail:
+            c = PatchedKorail(creds.ktx_id, creds.ktx_password, auto_login=False)
+            if not c.login():
                 raise RuntimeError("login returned False")
+            return c
+
+        try:
+            client = _new_client()
         except Exception as e:
             job.status = JobStatus.ERROR
             job.error = f"login failed: {e}"
@@ -163,6 +166,7 @@ class JobManager:
         seat_option = self._seat_pref_to_option(job.spec.seat_pref)
         train_type = TRAIN_TYPE_MAP.get(job.spec.train_type.lower(), TrainType.KTX)
         passengers = [AdultPassenger(job.spec.passengers)]
+        consecutive_antibot_errors = 0
 
         while not job._stop.is_set():
             job.attempts += 1
@@ -174,6 +178,7 @@ class JobManager:
                     include_no_seats=True,
                     include_waiting_list=job.spec.include_waiting,
                 )
+                consecutive_antibot_errors = 0
                 target = self._pick_target(trains, job.spec)
                 if target is None:
                     job.log(f"#{job.attempts} target not found")
@@ -205,12 +210,29 @@ class JobManager:
                             return
             except NoResultsError:
                 job.log(f"#{job.attempts} no results")
+                consecutive_antibot_errors = 0
             except NeedToLoginError:
                 job.log("session expired, re-login")
                 try:
-                    client.login(creds.ktx_id, creds.ktx_password)
+                    client = _new_client()
+                    consecutive_antibot_errors = 0
                 except Exception as e:
                     job.log(f"re-login failed: {e}")
+            except KorailError as e:
+                msg = str(e)
+                if any(p in msg for p in ("MACRO", "원활한 서비스", "최신 버전")):
+                    consecutive_antibot_errors += 1
+                    if consecutive_antibot_errors >= 3:
+                        job.log(f"anti-bot persistent ({consecutive_antibot_errors}x) → recreating client")
+                        try:
+                            client = _new_client()
+                            consecutive_antibot_errors = 0
+                        except Exception as e2:
+                            job.log(f"client recreate failed: {e2}")
+                    else:
+                        job.log(f"anti-bot error #{consecutive_antibot_errors}: {msg[:80]}")
+                else:
+                    job.log(f"korail error: {msg[:120]}")
             except Exception as e:
                 job.log(f"poll error: {type(e).__name__}: {e}")
 
