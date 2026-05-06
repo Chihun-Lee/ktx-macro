@@ -30,21 +30,31 @@ if [ -z "$PYTHON_BIN" ] && command -v python3 >/dev/null 2>&1; then
   fi
 fi
 if [ -z "$PYTHON_BIN" ]; then
-  echo "  → Python 3.10+ 가 없어 Homebrew로 자동 설치합니다."
-  if ! command -v brew >/dev/null 2>&1; then
-    echo "  → Homebrew도 없으므로 먼저 설치합니다 (5~10분, 비밀번호 1회)."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"
-    fi
+  echo "  → Python 3.10+ 가 없어 Python 공식 인스톨러로 설치합니다."
+  PY_VERSION="3.13.1"
+  PKG_URL="https://www.python.org/ftp/python/${PY_VERSION}/python-${PY_VERSION}-macos11.pkg"
+  TMP_PKG="/tmp/python-${PY_VERSION}.pkg"
+  echo "  → 다운로드 (~40MB)"
+  if ! curl -fsSL "$PKG_URL" -o "$TMP_PKG"; then
+    echo "  ✗ 다운로드 실패. https://www.python.org/downloads/macos/ 에서 직접 설치 후 재시도."
+    read -p "  엔터로 종료..."
+    exit 1
   fi
-  brew install python@3.12 >/dev/null
-  for cand in python3.12 python3; do
-    if command -v "$cand" >/dev/null 2>&1; then PYTHON_BIN="$(command -v "$cand")"; break; fi
+  echo "  → 설치 (관리자 비밀번호 1회, 1~2분)"
+  sudo installer -pkg "$TMP_PKG" -target /
+  rm -f "$TMP_PKG"
+  for cand in /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 \
+              /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+              python3.13 python3.12 python3; do
+    case "$cand" in /*) test -x "$cand" || continue ;; *) command -v "$cand" >/dev/null || continue ;; esac
+    [ -x "$cand" ] || cand="$(command -v "$cand")"
+    if "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+      PYTHON_BIN="$cand"; break
+    fi
   done
 fi
 if [ -z "$PYTHON_BIN" ]; then
-  echo "  ✗ Python 3.10+ 설치 실패. https://www.python.org/downloads/macos/ 에서 수동 설치 후 재시도."
+  echo "  ✗ Python 3.10+ 설치 실패. https://www.python.org/downloads/macos/ 에서 직접 설치 후 재시도."
   read -p "  엔터로 종료..."
   exit 1
 fi
