@@ -17,16 +17,39 @@ echo "  KTX 매크로 설치 시작"
 echo "════════════════════════════════════════"
 echo ""
 
-echo "[1/5] Python 확인..."
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "  → Python3가 없습니다. macOS 명령행 도구를 설치합니다."
-  xcode-select --install 2>&1 || true
-  echo "  설치가 끝나면 이 .command 파일을 다시 더블클릭하세요."
-  read -p "  엔터 키를 누르면 창이 닫힙니다..."
+echo "[1/5] Python 3.10+ 확인..."
+PYTHON_BIN=""
+for cand in python3.13 python3.12 python3.11 python3.10; do
+  if command -v "$cand" >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v "$cand")"; break
+  fi
+done
+if [ -z "$PYTHON_BIN" ] && command -v python3 >/dev/null 2>&1; then
+  if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)'; then
+    PYTHON_BIN="$(command -v python3)"
+  fi
+fi
+if [ -z "$PYTHON_BIN" ]; then
+  echo "  → Python 3.10+ 가 없어 Homebrew로 자동 설치합니다."
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "  → Homebrew도 없으므로 먼저 설치합니다 (5~10분, 비밀번호 1회)."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"
+    fi
+  fi
+  brew install python@3.12 >/dev/null
+  for cand in python3.12 python3; do
+    if command -v "$cand" >/dev/null 2>&1; then PYTHON_BIN="$(command -v "$cand")"; break; fi
+  done
+fi
+if [ -z "$PYTHON_BIN" ]; then
+  echo "  ✗ Python 3.10+ 설치 실패. https://www.python.org/downloads/macos/ 에서 수동 설치 후 재시도."
+  read -p "  엔터로 종료..."
   exit 1
 fi
-PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo "  ✓ Python $PY_VER"
+PY_VER=$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+echo "  ✓ Python $PY_VER ($PYTHON_BIN)"
 
 echo "[2/5] 코드 다운로드..."
 mkdir -p "$APP_DIR"
@@ -40,8 +63,14 @@ fi
 echo "  ✓ $INSTALL_DIR"
 
 echo "[3/5] Python 환경 구성 (1~3분 소요, srtgo git 빌드)..."
+if [ -x "$INSTALL_DIR/venv/bin/python" ]; then
+  if ! "$INSTALL_DIR/venv/bin/python" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)'; then
+    echo "  → 기존 venv 가 3.10 미만 → 재생성"
+    rm -rf "$INSTALL_DIR/venv"
+  fi
+fi
 if [ ! -x "$INSTALL_DIR/venv/bin/python" ]; then
-  python3 -m venv "$INSTALL_DIR/venv"
+  "$PYTHON_BIN" -m venv "$INSTALL_DIR/venv"
 fi
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
